@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 __version__ = "0.2"
 
+requests.packages.urllib3.disable_warnings()
 
 class PyMailCloudError(Exception):
     pass
@@ -117,7 +118,6 @@ class PyMailCloud:
                                         "token": self.token
                                     },
                                     )
-
         if response.status_code == 200:
             # ok!
             return json.dumps(response.json(), sort_keys=True, indent=3, ensure_ascii=False)
@@ -126,7 +126,7 @@ class PyMailCloud:
             print("Got HTTP 403 on listing folder contents, retrying...")
             self.__recreate_token()
             return self.get_folder_contents(folder)
-        elif response.status_code == (400 or 404):
+        elif response.status_code == 404:
             raise PyMailCloudError.NotFoundError("File or folder not found")
         else:
             # wtf?
@@ -250,23 +250,19 @@ class PyMailCloud:
             if 'path' not in file: path = '/'
             else: path = file['path']
             destination = path + os.path.basename(file['filename'])
-            if os.path.getsize(file['filename']) > 1024 * 1024 * 1024 * 2:
+            filesize = os.path.getsize(file['filename'])
+            if filesize > 1024 * 1024 * 1024 * 2:
                 raise PyMailCloudError.FileSizeError
-            monitor = MultipartEncoderMonitor.from_fields(
-                fields={'file': ('filename', f, 'application/octet-stream')},
-                callback=lambda monitor: self.upload_callback(monitor, progress))
-            upload_response = self.session.post(self.uploadTarget, data=monitor,
-                              headers={'Content-Type': monitor.content_type},verify=False)
-            if upload_response.status_code is not 200:
+            upload_response = self.session.put(self.uploadTarget, data=f.read(), headers={'Content-Type':'application/octet-stream'})
+            if upload_response.status_code is not 201:
                 raise PyMailCloudError.NetworkError
 
-            hash, filesize = upload_response.content.decode("utf-8").split(';')[0], upload_response.content.decode("utf-8").split(';')[1][:-2]
             response = self.session.post("https://cloud.mail.ru/api/v2/file/add",  # "http://httpbin.org/post",
                                          data={
                                              "token": self.token,
                                              "home": destination,
                                              "conflict": 'rename',
-                                             "hash": hash,
+                                             "hash": upload_response.content,
                                              "size": filesize,
                                          })
             return json.dumps(response.json(), sort_keys=True, indent=3, ensure_ascii=False)

@@ -81,6 +81,7 @@ class PyMailCloud:
             if getTokenResponse.status_code is not 200:
                 raise PyMailCloudError.UnknownError
             self.token = json.loads(getTokenResponse.content.decode("utf-8"))['body']['token']
+            self.session.headers.update({'X-CSRF-Token': self.token})
             print('Login successful')
             self.__get_download_source()
         else:
